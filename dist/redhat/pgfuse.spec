@@ -75,6 +75,16 @@
 %define fc24 1
 %define fedora 1
 %endif
+%if 0%{?fedora_version} == 25
+%define dist fc25
+%define fc25 1
+%define fedora 1
+%endif
+%if 0%{?fedora_version} == 26
+%define dist fc26
+%define fc26 1
+%define fedora 1
+%endif
 
 %define suse 0
 %define osu131 0
