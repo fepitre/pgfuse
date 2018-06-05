@@ -11,3 +11,99 @@
   Rewriting...Can't read a full block, only got 0 bytes.
   Bad seek offset
   Error in seek(0)
+- sort out the mess in ctime, mtime and atime 
+  ctime is the metadata change time (now it's more like a creation time).
+  mtime is the modification time of the contents.
+  atime is access to the contents.
+- Implement hard links
+  We can use 'parent_id' in 'dir' for directories as well as for hard links. Just the unlinking
+  has to be careful to delete non-parents, if deleting one parent to promote another node to
+  parent and deleting the last entry if n_link is one.
+  Also directory listings should take into account the mode of the dir entry (being directory and
+  not a hardlink).
+  Small adaptions in stat to report 'n_link' are also needed.
+  The database structure can stay the same.
+  No! parent_id is for the containing directory of the hard link, so if we want to support hard links we
+  must proceed differently..
+  Easiest would be to introduce a table with (dir_id, data_id), data_id being a reference to data.id (a
+  new serial) and eliminate the dir_id in data (now we have a 1:1 relation between data and directory entry,
+  we need 1:n). The now schema is optimal if you don't need hard links (which seems to be kind of a design
+  goal in pgfuse). Also breaking the schema is nothing I would like to do now.
+  Another option is to implement them like symlinks. If the mode is not SMLNK and the data contains a magic
+  token. Well, hacky. :-)
+- Work on self-containment
+  If the database disappears, bad things happen. Make sure we can stop and restart the database and pgfuse
+  must react gracefully: find out it lost the connection to the database, while the database is down report
+  a decent error like 'I/O error' to the users of the mounted filesystem, discover the database being up again and do a reconnect.
+- Test git init on a pgfuse mount point
+  For example using git on a pgfuse mounted directory fails due to lack of locking:
+
+error: could not commit config file /home/abaumann/test/.git/config
+error: could not commit config file /home/abaumann/test/.git/config
+error: could not commit config file /home/abaumann/test/.git/config
+Initialized empty Git repository in /home/abaumann/test/.git/
+another candidate for problems ist O_CREAT and O_EXCL which are currently not handled..
+Long time ago, so I forgot about FUSE completely. :-)
+lock doesn't have to be implemented in the 'lock' callback but for network or special filesystems. Otherwise local locking inside FUSE should do all the work.
+
+We have to treat 'open' flags correctly and then see if we still get those errors.
+Aha, suspicious:
+
+May 06 20:54:29 eurohp1 pgfuse[16940]: Renaming '/.git/config.lock' to '/.git/config' on 'test/', thread #3071105536
+May 06 20:54:29 eurohp1 pgfuse[16940]: Remove file '/.git/config.lock' on 'test/', thread #3071105536
+May 06 20:54:29 eurohp1 postgres[10868]: WARNING:  there is already a transaction in progress
+
+So it's the famous rename trick hitting us, also seen it on 'git on sshfs' or 'git on Amazon S3 fuse'?
+Fixed bugs in transactions, but git behaves the same..
+Checking the locking code in git and trying to produce a test case.
+It's now definitely something with locking..
+lockfile.c in git:
+
+int commit_lock_file_to(struct lock_file *lk, const char *path)
+{
+...
+        if (rename(lk->filename.buf, path)) {
+...
+
+This rename fails with:
+
+rename("/media/sd/abaumann/projects/pgfuse/tests/mnt/.git/config.lock", "/media/sd/abaumann/projects/pgfuse/tests/mnt/.git/config") = -1 EEXIST (File exists)
+unlink("/media/sd/abaumann/projects/pgfuse/tests/mnt/.git/config.lock") = 0
+write(2, "error: could not commit config f"..., 93error: could not commit config file /media/sd/abaumann/projects/pgfuse/tests/mnt/.git/config
+) = 93
+
+So the problem is that a rename to an existing file should overwrite the exisiting file and not result
+in EEXIST..
+The rename problem is solved, so a 'git init' works now.
+
+Tried 'git add' and 'git commit', but after this I get:
+
+shell> git status
+error: bad index file sha1 signature
+fatal: index file corrupt
+shell> git diff
+error: bad index file sha1 signature
+fatal: index file corrupt
+
+git add shows:
+
+add:link(".git/objects/d9/tmp_obj_eTkITa", ".git/objects/d9/b401251bb36c51ca5c56c2ffc8a24a78ff20ae") = -1 ENOSYS (Function not implemented)
+
+This can't be good. :-)
+
+So we have to implement and test hard links correctly (or better: at all), see #3
+Quite some times are not set correctly, see separate bug #4.
+ nicferrier commented on Nov 30, 2017
+
+I'm looking at this too now. Maybe I can get it working. Did you ever find a definitive reason why this won't work?
+
+Yeah. It boils down to some bugs and not having implemented hard-links.. :-)
+..and more to come.
+
+I'm curious. What is the use case for running git on a FUSE filesystem?
+
+Well, I'm thinking that it would be fun to write a github thing (I work in a large enterprise) with decent wiki and ticket integration and use postgres for the storage for the whole thing. That would make it scalable (it's easy to scale pg after all, with lots of peers). I could just store the git for such a thing in files... but it would be interesting if it was pg.
+
+What I just discovered was that it only seems to be working copies that are problematic. It seems I can store bare git repos with pgfuse. Which actually is all I need. :-)
+Ah, this is good news. :-)
+
