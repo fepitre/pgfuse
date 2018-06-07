@@ -5,7 +5,7 @@ Maintainer: Andreas Baumann <mail@andreasbaumann.cc>
 Build-Depends: debhelper (>= 4.1.16), pkg-config,
  libpq-dev, libfuse-dev
 Standards-Version: 3.8.3
-Homepage: https://github.com/andreasbaumann/pgfuse
+Homepage: http://www.pgfuse.org
 
 Package: pgfuse
 Architecture: any

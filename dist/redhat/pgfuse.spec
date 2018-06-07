@@ -140,7 +140,7 @@ Group: System/Filesystems
 
 Source: %{name}_%{main_version}.tar.gz
 
-URL: https://github.com/andreasbaumann/pgfuse
+URL: http://www.pgfuse.org
 
 BuildRoot: %{_tmppath}/%{name}-root
 
